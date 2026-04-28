@@ -1,0 +1,272 @@
+Script for Final Project: Assessment of Microbial Communities in Cantaloupes and Associated Agroecosystems 
+# Following the Moving Pictures Tutorial from QIIME2, version 2024.10 (https://docs.qiime2.org/2024.10/tutorials/moving-pictures/)
+
+scp path/to/file your_username@bell.rcac.purdue.edu:/path/to/destination    
+This is the absolute path: cd /depot/microbiome/data/ANSC516/avanega/FinalProject
+
+##Directory organization:
+mv SRR_Acc_List.txt data_download_Project/
+
+##Move to the scratch directory and create a new directory: 
+	cd /scratch/bell/avanega
+	ls
+	mkdir data_download_Project
+	ls
+	cd data_download_Project
+
+##Copy what I have in the Depot folder to the Scratch folder:
+	cp /depot/microbiome/data/ANSC516/avanega/FinalProject/data_download_Project/SRR_Acc_List.txt .
+
+mkdir seq1
+mkdir raw1
+prefetch -O raw1 --option-file SRR_Acc_List.txt 
+ls raw1
+ls raw1/SRR13485828
+cp raw1/SRR*/*.sra seq1/
+cd seq1
+ls
+for i in *.sra; do fasterq-dump ${i} --split-3 -O .; done
+ls
+
+##MAKING A MANIFEST FILE
+
+cd /scratch/bell/avanega
+mkdir qiime/manifest_import
+mkdir qiime/manifest_import/seqs
+cd qiime/manifest_import/
+cp /depot/microbiome/data/ANSC516/class_materials/qiime/qiime_with_mothur_data/data/raw/* seqs
+ls
+
+qiime tools import \
+--type 'SampleData[PairedEndSequencesWithQuality]' \
+--input-path /scratch/bell/avanega/data_download/manifest_file.txt \
+--input-format PairedEndFastqManifestPhred33V2 \
+--output-path demux.qza
+
+##My directory: 
+cd /scratch/bell/avanega/data_download_Project/qiime/manifest_import
+
+##Copy data from the following directory:
+cp /depot/microbiome/data/ANSC516/avanega/FinalProject/data_download_Project/seq1/* seqs
+ls seqs
+	ls -1 "$PWD/"*_1.*
+	ls -1 "$PWD/"*_2.*
+
+##Get the Excel file with the Manifest and I save it as (.txt or .tsv). and import the manifest to the cluster by using the following command: 
+scp path/to/file your_username@bell.rcac.purdue.edu:/path/to/destination
+
+Go to 
+cd /depot/microbiome/data/ANSC516/avanega/FinalProject
+
+##organized the directory: 
+	mv melon_manifest.txt data_download_Project/
+
+##Now move to the scratch directory and create a new directory: 
+	cd /scratch/bell/avanega
+	ls
+
+##Copy from the Depot folder to the Scratch folder:
+cp /depot/microbiome/data/ANSC516/avanega/FinalProject/data_download_Project/melon_manifest1.txt .
+	ls
+
+qiime tools import \
+--type 'SampleData[PairedEndSequencesWithQuality]' \
+--input-path /scratch/bell/avanega/qiime_Project/melon_manifest1.txt \
+--input-format PairedEndFastqManifestPhred33V2 \
+--output-path demux1.qza
+
+qiime demux summarize \
+  	--i-data demux.qza \
+  	--o-visualization demux.qzv
+
+##Now we will perform the DADA2 pipeline
+
+#Load modules to get the software
+module purge
+module load biocontainers
+module load qiime2
+
+cd /scratch/bell/avanega/qiime_Project/MP_melon1/second_dada2
+
+"initiating DADA2 pipeline"
+
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs melon1_demux.qza \
+  --p-trim-left-f 0 \
+  --p-trim-left-r 0 \
+  --p-trunc-len-f 242 \ 
+  --p-trunc-len-r 228 \
+  --o-representative-sequences rep-seqs-dada2.qza \
+  --o-table table-dada2.qza \
+  --o-denoising-stats stats-dada2.qza
+
+#Convert .qza to .qzv format
+
+qiime metadata tabulate \
+  --m-input-file stats-dada2.qza \
+  --o-visualization stats-dada2.qzv
+
+mv rep-seqs-dada2.qza rep-seqs.qza
+mv table-dada2.qza table.qza
+
+#Create a .qzv from the output of denoise
+qiime feature-table summarize \
+  --i-table table.qza \
+  --o-visualization table.qzv \
+  --m-sample-metadata-file sample_metadata1.txt
+
+qiime feature-table tabulate-seqs \
+  --i-data rep-seqs.qza \
+  --o-visualization rep-seqs.qzv
+
+"Create a phylogenetic tree. (Phylogenetic method)"
+qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs.qza \
+  --o-alignment aligned-rep-seqs.qza \
+  --o-masked-alignment masked-aligned-rep-seqs.qza \
+  --o-tree unrooted-tree.qza \
+  --o-rooted-tree rooted-tree.qza
+
+"Rarefaction"
+qiime diversity alpha-rarefaction \
+  --i-table table.qza \
+  --i-phylogeny rooted-tree.qza \
+  --p-max-depth 21000 \
+  --m-metadata-file sample_metadata1.txt \
+ --o-visualization alpha-rarefaction.qzv
+
+##Now we perform the taxonomic analysis to create the taxonomy.qza file
+
+"Taxonomic Analysis"
+
+wget \
+  -O "gg-13-8-99-515-806-nb-classifier.qza" \
+  "https://data.qiime2.org/classifiers/sklearn-1.4.2/greengenes/gg-13-8-99-515-806-nb-classifier.qza"
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier gg-13-8-99-515-806-nb-classifier.qza \
+  --i-reads rep-seqs.qza \
+  --o-classification taxonomy.qza
+
+qiime metadata tabulate \
+  --m-input-file taxonomy.qza \
+  --o-visualization taxonomy.qzv
+
+#Remove mitochondria and chloroplast
+
+echo "Removing mitochondria and chloroplast"
+
+qiime taxa filter-table \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-exclude mitochondria,chloroplast \
+ --o-filtered-table table-no-mitochondria-no-chloroplast.qza
+
+#Rename files so that the filtered one is table.qza
+
+mv table.qza table-with-mitochondria-and-chloroplast.qza
+mv table-no-mitochondria-no-chloroplast.qza table.qza
+
+##Now we will create Taxonomic interactive bar plots
+
+"taxonomic bar plots"
+qiime taxa barplot \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --o-visualization taxa-bar-plots.qzv
+
+##Import data to my computer 
+scp your_username@bell.rcac.purdue.edu:/path/to/file path/to/destination  
+
+#Calculate diversity metrics
+qiime diversity core-metrics-phylogenetic \
+  --i-phylogeny rooted-tree.qza \
+  --i-table table.qza \
+  --p-sampling-depth 19100 \
+  --m-metadata-file sample_metadata1.txt \
+  --output-dir core-metrics-results
+
+#Statistical testing
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --o-visualization core-metrics-results/faith-pd-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/evenness_vector.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --o-visualization core-metrics-results/evenness-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/shannon_vector.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --o-visualization core-metrics-results/shannon-group-significance.qzv
+
+qiime diversity alpha-group-significance \
+  --i-alpha-diversity core-metrics-results/observed_features_vector.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --o-visualization core-metrics-results/observed_features-group-significance.qzv
+
+
+#PERMANOVA test
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --m-metadata-column organism \
+  --o-visualization core-metrics-results/unweighted-unifrac-organism.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/bray_curtis_distance_matrix.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --m-metadata-column organism \
+  --o-visualization core-metrics-results/bray-curtis-organism.qzv \
+  --p-pairwise
+
+qiime diversity beta-group-significance \
+  --i-distance-matrix core-metrics-results/jaccard_distance_matrix.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --m-metadata-column organism \
+  --o-visualization core-metrics-results/jaccard-distance-organism.qzv \
+  --p-pairwise
+
+Import data to my computer
+scp your_username@bell.rcac.purdue.edu:/path/to/file path/to/destination
+
+#Differential abundance testing with ANCOM-BC
+
+qiime composition ancombc \
+  --i-table table.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --p-formula 'organism' \
+  --o-differentials ancombc-organism.qza
+
+qiime composition da-barplot \
+  --i-data ancombc-organism.qza \
+  --p-significance-threshold 0.001 \
+  --o-visualization da-barplot-organism.qzv
+
+qiime taxa collapse \
+  --i-table table.qza \
+  --i-taxonomy taxonomy.qza \
+  --p-level 6 \
+  --o-collapsed-table organism-table-l6.qza
+
+qiime composition ancombc \
+  --i-table organism-table-l6.qza \
+  --m-metadata-file sample_metadata1.txt \
+  --p-formula 'organism' \
+  --o-differentials l6-ancombc-organism.qza
+
+qiime composition da-barplot \
+  --i-data l6-ancombc-organism.qza \
+  --p-significance-threshold 0.001 \
+  --p-level-delimiter ';' \
+  --o-visualization l6-da-barplot-organism.qzv
+
+
+Import data to my computer
+scp your_username@bell.rcac.purdue.edu:/path/to/file path/to/destination
