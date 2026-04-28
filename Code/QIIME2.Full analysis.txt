@@ -1,5 +1,5 @@
 Script for Final Project: Assessment of Microbial Communities in Cantaloupes and Associated Agroecosystems 
-# Following the Moving Pictures Tutorial from QIIME2, version 2024.10 (https://docs.qiime2.org/2024.10/tutorials/moving-pictures/)
+
 
 scp path/to/file your_username@bell.rcac.purdue.edu:/path/to/destination    
 This is the absolute path: cd /depot/microbiome/data/ANSC516/avanega/FinalProject
